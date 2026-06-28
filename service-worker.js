@@ -1,73 +1,54 @@
-// Version du cache — à incrémenter à chaque déploiement majeur
-const CACHE_NAME = 'app-cache-v5.9';
-const urlsToCache = ['/'];
+/* ═══════════════════════════════════════════════════════════
+   ASTEL — Service Worker (network-first)
+   Objectif : toujours servir la dernière version en ligne ;
+   le cache ne sert QUE de secours hors-ligne.
+   - N'intercepte que les requêtes GET de même origine.
+   - Laisse passer Firebase / Firestore / Google Fonts / CDN
+     (cross-origin) sans y toucher → la synchro n'est jamais gênée.
+   ═══════════════════════════════════════════════════════════ */
+const CACHE = 'astel-cache-v1';
+const CORE = ['/', '/index.html'];
 
-// Installation : mise en cache minimale
-self.addEventListener('install', event => {
-  self.skipWaiting(); // Active immédiatement sans attendre
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
-      .catch(err => console.log('Cache install failed:', err))
-  );
+self.addEventListener('install', (e) => {
+  self.skipWaiting();
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE).catch(() => {})));
 });
 
-// Activation : supprime tous les anciens caches
-self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys().then(cacheNames =>
-      Promise.all(
-        cacheNames.filter(name => name !== CACHE_NAME)
-          .map(name => caches.delete(name))
-      )
-    ).then(() => self.clients.claim()) // Prend le contrôle immédiatement
-  );
+self.addEventListener('activate', (e) => {
+  e.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+    await self.clients.claim();
+  })());
 });
 
-// Fetch : network first pour index.html, cache first pour le reste
-self.addEventListener('fetch', event => {
-  const { request } = event;
-  const url = new URL(request.url);
+self.addEventListener('message', (e) => {
+  if (e.data === 'SKIP_WAITING') self.skipWaiting();
+});
 
-  // Firebase/Firestore/APIs externes : réseau uniquement
-  if (
-    url.hostname.includes('firestore') ||
-    url.hostname.includes('firebase') ||
-    url.hostname.includes('googleapis') ||
-    url.hostname.includes('gstatic')
-  ) {
-    event.respondWith(fetch(request));
-    return;
-  }
+self.addEventListener('fetch', (e) => {
+  const req = e.request;
+  if (req.method !== 'GET') return;                       // jamais sur les écritures
+  let url;
+  try { url = new URL(req.url); } catch (_) { return; }
+  if (url.origin !== self.location.origin) return;        // laisse passer Firebase / fonts / CDN
 
-  // index.html : TOUJOURS réseau en premier pour avoir la dernière version
-  if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname.endsWith('index.html')) {
-    event.respondWith(
-      fetch(request).then(response => {
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(request, clone));
-        }
-        return response;
-      }).catch(() => caches.match(request)) // Fallback cache si hors-ligne
-    );
-    return;
-  }
-
-  // Autres assets GET : cache first
-  if (request.method === 'GET') {
-    event.respondWith(
-      caches.match(request).then(cached => {
-        return cached || fetch(request).then(response => {
-          if (response.ok) {
-            caches.open(CACHE_NAME).then(c => c.put(request, response.clone()));
-          }
-          return response;
-        }).catch(() => new Response('Offline', { status: 503 }));
-      })
-    );
-    return;
-  }
-
-  // POST/PUT/DELETE : réseau uniquement
-  event.respondWith(fetch(request));
+  e.respondWith((async () => {
+    try {
+      const fresh = await fetch(req);
+      if (fresh && fresh.status === 200 && fresh.type === 'basic') {
+        const c = await caches.open(CACHE);
+        c.put(req, fresh.clone()).catch(() => {});
+      }
+      return fresh;
+    } catch (err) {
+      const cached = await caches.match(req);
+      if (cached) return cached;
+      if (req.mode === 'navigate') {
+        const idx = (await caches.match('/index.html')) || (await caches.match('/'));
+        if (idx) return idx;
+      }
+      throw err;
+    }
+  })());
 });

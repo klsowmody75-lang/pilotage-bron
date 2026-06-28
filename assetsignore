@@ -1,0 +1,6 @@
+.github
+wrangler.toml
+.assetsignore
+*.md
+set-roles.js
+firestore.rules

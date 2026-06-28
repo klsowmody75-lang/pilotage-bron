@@ -1,0 +1,8 @@
+# Configuration de déploiement ASTEL — Worker "static assets"
+# Le nom DOIT rester identique pour conserver l'URL et l'accès Zero Trust.
+name = "pilotage-bron"
+compatibility_date = "2025-06-01"
+
+[assets]
+directory = "."
+# _headers (sécurité) et _redirects sont pris en charge automatiquement.
