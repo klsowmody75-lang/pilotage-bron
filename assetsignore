@@ -1,6 +1,8 @@
+.git
 .github
-wrangler.toml
+.wrangler
 .assetsignore
+wrangler.toml
 *.md
 set-roles.js
 firestore.rules
