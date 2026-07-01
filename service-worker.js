@@ -1,54 +1,58 @@
-/* ═══════════════════════════════════════════════════════════
-   ASTEL — Service Worker (network-first)
-   Objectif : toujours servir la dernière version en ligne ;
-   le cache ne sert QUE de secours hors-ligne.
-   - N'intercepte que les requêtes GET de même origine.
-   - Laisse passer Firebase / Firestore / Google Fonts / CDN
-     (cross-origin) sans y toucher → la synchro n'est jamais gênée.
-   ═══════════════════════════════════════════════════════════ */
-const CACHE = 'astel-cache-v1';
-const CORE = ['/', '/index.html'];
+/* ASTEL - Service Worker (network-first)
+   Corrige le conflit avec firebase-messaging-sw.js (notifications push).
+   -> Ne renvoie JAMAIS une reponse redirigee (Safari la refuse).
+   -> N'intercepte PAS le service worker des notifications. */
 
-self.addEventListener('install', (e) => {
+const CACHE = 'astel-cache-v2';
+
+self.addEventListener('install', () => {
   self.skipWaiting();
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE).catch(() => {})));
 });
 
-self.addEventListener('activate', (e) => {
-  e.waitUntil((async () => {
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
     const keys = await caches.keys();
     await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
     await self.clients.claim();
   })());
 });
 
-self.addEventListener('message', (e) => {
-  if (e.data === 'SKIP_WAITING') self.skipWaiting();
-});
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
 
-self.addEventListener('fetch', (e) => {
-  const req = e.request;
-  if (req.method !== 'GET') return;                       // jamais sur les écritures
-  let url;
-  try { url = new URL(req.url); } catch (_) { return; }
-  if (url.origin !== self.location.origin) return;        // laisse passer Firebase / fonts / CDN
+  const url = new URL(req.url);
 
-  e.respondWith((async () => {
+  // 1) Ne JAMAIS intercepter le service worker des notifications
+  //    (sinon Safari refuse de l'enregistrer -> "load failed" / "has redirections")
+  if (url.pathname.endsWith('/firebase-messaging-sw.js')) return;
+
+  // 2) Laisser passer tout ce qui n'est pas sur notre domaine
+  //    (Firebase, Google Fonts, CDN, worker push...)
+  if (url.origin !== self.location.origin) return;
+
+  // 3) Reseau d'abord, cache en secours (hors-ligne)
+  event.respondWith((async () => {
     try {
-      const fresh = await fetch(req);
-      if (fresh && fresh.status === 200 && fresh.type === 'basic') {
-        const c = await caches.open(CACHE);
-        c.put(req, fresh.clone()).catch(() => {});
+      const res = await fetch(req);
+      // Safari refuse une reponse redirigee -> on la reconstruit "propre"
+      if (res.redirected) {
+        const body = await res.clone().blob();
+        return new Response(body, {
+          status: res.status,
+          statusText: res.statusText,
+          headers: res.headers
+        });
       }
-      return fresh;
-    } catch (err) {
+      if (res && res.ok) {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+      }
+      return res;
+    } catch (e) {
       const cached = await caches.match(req);
       if (cached) return cached;
-      if (req.mode === 'navigate') {
-        const idx = (await caches.match('/index.html')) || (await caches.match('/'));
-        if (idx) return idx;
-      }
-      throw err;
+      throw e;
     }
   })());
 });

@@ -1,13 +1,8 @@
-# En-têtes de sécurité ASTEL — Cloudflare Pages
-# À déployer à côté de index.html (fichier nommé exactement "_headers", sans extension).
-# Zéro impact sur le fonctionnement : ces en-têtes ne restreignent NI le script inline,
-# NI les styles inline, NI les connexions Firebase. Ils ajoutent une protection défensive.
-
 /*
   X-Content-Type-Options: nosniff
-  Referrer-Policy: strict-origin-when-cross-origin
   X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: strict-origin-when-cross-origin
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
   Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()
   Content-Security-Policy: frame-ancestors 'self'; object-src 'none'; base-uri 'self'
-  Cross-Origin-Opener-Policy: same-origin-allow-popups
   Strict-Transport-Security: max-age=31536000; includeSubDomains
